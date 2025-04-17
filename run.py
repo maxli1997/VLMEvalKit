@@ -132,7 +132,7 @@ You can launch the evaluation by setting either --data and --model or --config.
     # Work Dir
     parser.add_argument('--work-dir', type=str, default='./outputs', help='select the output directory')
     # Infer + Eval or Infer Only
-    parser.add_argument('--mode', type=str, default='all', choices=['all', 'infer'])
+    parser.add_argument('--mode', type=str, default='all', choices=['all', 'infer', 'eval'])
     # API Kwargs, Apply to API VLMs and Judge API LLMs
     parser.add_argument('--api-nproc', type=int, default=4, help='Parallel API calling')
     parser.add_argument('--retry', type=int, default=None, help='retry numbers for API VLMs')
@@ -150,6 +150,8 @@ You can launch the evaluation by setting either --data and --model or --config.
     parser.add_argument('--reuse-aux', type=bool, default=True, help='reuse auxiliary evaluation files')
     parser.add_argument(
         '--use-vllm', action='store_true', help='use vllm to generate, the flag is only supported in Llama4 for now')
+    parser.add_argument(
+        '--choice', type=int, default=1, help='number of CoT candidates')
 
     args = parser.parse_args()
     return args
@@ -295,37 +297,39 @@ def main():
                 if model is None:
                     model = model_name  # which is only a name
 
-                # Perform the Inference
-                if dataset.MODALITY == 'VIDEO':
-                    model = infer_data_job_video(
-                        model,
-                        work_dir=pred_root,
-                        model_name=model_name,
-                        dataset=dataset,
-                        result_file_name=result_file_base,
-                        verbose=args.verbose,
-                        api_nproc=args.api_nproc,
-                        use_vllm=args.use_vllm)
-                elif dataset.TYPE == 'MT':
-                    model = infer_data_job_mt(
-                        model,
-                        work_dir=pred_root,
-                        model_name=model_name,
-                        dataset=dataset,
-                        verbose=args.verbose,
-                        api_nproc=args.api_nproc,
-                        ignore_failed=args.ignore,
-                        use_vllm=args.use_vllm)
-                else:
-                    model = infer_data_job(
-                        model,
-                        work_dir=pred_root,
-                        model_name=model_name,
-                        dataset=dataset,
-                        verbose=args.verbose,
-                        api_nproc=args.api_nproc,
-                        ignore_failed=args.ignore,
-                        use_vllm=args.use_vllm)
+                if args.mode in ['all', 'infer']:
+                    # Perform the Inference
+                    if dataset.MODALITY == 'VIDEO':
+                        model = infer_data_job_video(
+                            model,
+                            work_dir=pred_root,
+                            model_name=model_name,
+                            dataset=dataset,
+                            result_file_name=result_file_base,
+                            verbose=args.verbose,
+                            api_nproc=args.api_nproc,
+                            use_vllm=args.use_vllm)
+                    elif dataset.TYPE == 'MT':
+                        model = infer_data_job_mt(
+                            model,
+                            work_dir=pred_root,
+                            model_name=model_name,
+                            dataset=dataset,
+                            verbose=args.verbose,
+                            api_nproc=args.api_nproc,
+                            ignore_failed=args.ignore,
+                            use_vllm=args.use_vllm)
+                    else:
+                        model = infer_data_job(
+                            model,
+                            work_dir=pred_root,
+                            model_name=model_name,
+                            dataset=dataset,
+                            verbose=args.verbose,
+                            api_nproc=args.api_nproc,
+                            ignore_failed=args.ignore,
+                            use_vllm=args.use_vllm,
+                            choice=args.choice)
 
                 # Set the judge kwargs first before evaluation or dumping
 
@@ -409,35 +413,38 @@ def main():
                     old_proxy = os.environ.get('HTTP_PROXY', '')
                     if eval_proxy is not None:
                         proxy_set(eval_proxy)
+                    for i in range(args.choice):
+                        # Perform the Evaluation
+                        if args.choice > 1:
+                            eval_results = dataset.evaluate(result_file.replace('.xlsx', '') + f'-{i}.xlsx', **judge_kwargs)
+                        else:
+                            eval_results = dataset.evaluate(result_file, **judge_kwargs)
+                        # Display Evaluation Results in Terminal
+                        if eval_results is not None:
+                            assert isinstance(eval_results, dict) or isinstance(eval_results, pd.DataFrame)
+                            logger.info(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
+                            logger.info('Evaluation Results:')
+                            if isinstance(eval_results, dict):
+                                logger.info('\n' + json.dumps(eval_results, indent=4))
+                            elif isinstance(eval_results, pd.DataFrame):
+                                if len(eval_results) < len(eval_results.columns):
+                                    eval_results = eval_results.T
+                                logger.info('\n' + tabulate(eval_results))
 
-                    # Perform the Evaluation
-                    eval_results = dataset.evaluate(result_file, **judge_kwargs)
-                    # Display Evaluation Results in Terminal
-                    if eval_results is not None:
-                        assert isinstance(eval_results, dict) or isinstance(eval_results, pd.DataFrame)
-                        logger.info(f'The evaluation of model {model_name} x dataset {dataset_name} has finished! ')
-                        logger.info('Evaluation Results:')
-                        if isinstance(eval_results, dict):
-                            logger.info('\n' + json.dumps(eval_results, indent=4))
-                        elif isinstance(eval_results, pd.DataFrame):
-                            if len(eval_results) < len(eval_results.columns):
-                                eval_results = eval_results.T
-                            logger.info('\n' + tabulate(eval_results))
+                        # Restore the proxy
+                        if eval_proxy is not None:
+                            proxy_set(old_proxy)
 
-                    # Restore the proxy
-                    if eval_proxy is not None:
-                        proxy_set(old_proxy)
-
-                    # Create the symbolic links for the prediction files
-                    files = os.listdir(pred_root)
-                    files = [x for x in files if (f'{model_name}_{dataset_name}' in x or "status.json" in x)]
-                    for f in files:
-                        cwd = os.getcwd()
-                        file_addr = osp.join(cwd, pred_root, f)
-                        link_addr = osp.join(cwd, pred_root_meta, f)
-                        if osp.exists(link_addr) or osp.islink(link_addr):
-                            os.remove(link_addr)
-                        os.symlink(file_addr, link_addr)
+                        # Create the symbolic links for the prediction files
+                        files = os.listdir(pred_root)
+                        files = [x for x in files if (f'{model_name}_{dataset_name}' in x or "status.json" in x)]
+                        for f in files:
+                            cwd = os.getcwd()
+                            file_addr = osp.join(cwd, pred_root, f)
+                            link_addr = osp.join(cwd, pred_root_meta, f)
+                            if osp.exists(link_addr) or osp.islink(link_addr):
+                                os.remove(link_addr)
+                            os.symlink(file_addr, link_addr)
 
             except Exception as e:
                 logger.exception(f'Model {model_name} x Dataset {dataset_name} combination failed: {e}, '

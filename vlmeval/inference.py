@@ -79,7 +79,7 @@ def infer_data_api(model, work_dir, model_name, dataset, index_set=None, api_npr
     return res
 
 
-def infer_data(model, model_name, work_dir, dataset, out_file, verbose=False, api_nproc=4, use_vllm=False):
+def infer_data(model, model_name, work_dir, dataset, out_file, verbose=False, api_nproc=4, use_vllm=False, choice=1):
     dataset_name = dataset.dataset_name
     prev_file = f'{work_dir}/{model_name}_{dataset_name}_PREV.pkl'
     res = load(prev_file) if osp.exists(prev_file) else {}
@@ -108,6 +108,8 @@ def infer_data(model, model_name, work_dir, dataset, out_file, verbose=False, ap
     lt = len(data)
 
     kwargs = {}
+    if choice > 1:
+        kwargs = {'k_first': choice}
     if model_name is not None and 'Llama-4' in model_name:
         kwargs = {'use_vllm': use_vllm}
     model = supported_VLM[model_name](**kwargs) if isinstance(model, str) else model
@@ -158,7 +160,7 @@ def infer_data(model, model_name, work_dir, dataset, out_file, verbose=False, ap
 
 # A wrapper for infer_data, do the pre & post processing
 def infer_data_job(
-    model, work_dir, model_name, dataset, verbose=False, api_nproc=4, ignore_failed=False, use_vllm=False
+    model, work_dir, model_name, dataset, verbose=False, api_nproc=4, ignore_failed=False, use_vllm=False, choice=1,
 ):
     rank, world_size = get_rank_and_world_size()
     dataset_name = dataset.dataset_name
@@ -180,7 +182,7 @@ def infer_data_job(
 
     model = infer_data(
         model=model, work_dir=work_dir, model_name=model_name, dataset=dataset,
-        out_file=out_file, verbose=verbose, api_nproc=api_nproc, use_vllm=use_vllm)
+        out_file=out_file, verbose=verbose, api_nproc=api_nproc, use_vllm=use_vllm, choice=choice,)
     if world_size > 1:
         dist.barrier()
 
@@ -192,11 +194,21 @@ def infer_data_job(
         data = dataset.data
         for x in data['index']:
             assert x in data_all
-        data['prediction'] = [str(data_all[x]) for x in data['index']]
-        if 'image' in data:
-            data.pop('image')
+        if choice == 1:
+            data['prediction'] = [str(data_all[x]) for x in data['index']]
+            dump(data, result_file)
+        else:
+            for i in range(choice):
+                data['prediction'] = [str(data_all[x][i][0]) for x in data['index']]
+                try:
+                    data['confidence'] = [str(data_all[x][i][1]) for x in data['index']]
+                except:
+                    pass
+                data['length'] = [str(data_all[x][i][-1]) for x in data['index']]
+                if 'image' in data:
+                    data.pop('image')
 
-        dump(data, result_file)
+                dump(data, result_file.replace('.xlsx','') + f'-{i}.xlsx')
         for i in range(world_size):
             os.remove(tmpl.format(i))
     if world_size > 1:
