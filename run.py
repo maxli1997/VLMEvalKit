@@ -152,6 +152,8 @@ You can launch the evaluation by setting either --data and --model or --config.
         '--use-vllm', action='store_true', help='use vllm to generate, the flag is only supported in Llama4 for now')
     parser.add_argument(
         '--choice', type=int, default=1, help='number of CoT candidates')
+    parser.add_argument(
+        '--do-sample', action='store_true', help='majority votes requires do-sample to be set to True')
 
     args = parser.parse_args()
     return args
@@ -329,7 +331,8 @@ def main():
                             api_nproc=args.api_nproc,
                             ignore_failed=args.ignore,
                             use_vllm=args.use_vllm,
-                            choice=args.choice)
+                            choice=args.choice,
+                            do_sample=args.do_sample)
 
                 # Set the judge kwargs first before evaluation or dumping
 
@@ -416,7 +419,7 @@ def main():
                     for i in range(args.choice):
                         # Perform the Evaluation
                         if args.choice > 1:
-                            eval_results = dataset.evaluate(result_file.replace('.xlsx', '') + f'-{i}.xlsx', **judge_kwargs)
+                            eval_results = dataset.evaluate(result_file.replace('.xlsx', '') + f'_{args.do_sample}_{i}.xlsx', **judge_kwargs)
                         else:
                             eval_results = dataset.evaluate(result_file, **judge_kwargs)
                         # Display Evaluation Results in Terminal

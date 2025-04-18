@@ -70,7 +70,7 @@ class CoT(CoTPromptMixin, BaseModel):
         model_path: str,
         min_pixels: int | None = None,
         max_pixels: int | None = None,
-        max_new_tokens=50,
+        max_new_tokens=1024,
         top_p=0.001,
         top_k=1,
         temperature=0.01,
@@ -198,12 +198,6 @@ class CoT(CoTPromptMixin, BaseModel):
         if self.verbose:
             print(f'\033[31m{messages}\033[0m')
 
-        text = self.processor.apply_chat_template([messages], tokenize=False, add_generation_prompt=True)
-        images, videos = process_vision_info([messages])
-        inputs = self.processor(text=text, images=images, videos=videos, padding=True, return_tensors='pt')
-        inputs = inputs.to('cuda')
-
-        
         if self.do_sample and self.k_first > 1:
             out = []
             batch_messages = [messages for _ in range(self.k_first)]
@@ -222,19 +216,23 @@ class CoT(CoTPromptMixin, BaseModel):
             )
             for i in range(self.k_first):
                 out.append((majority_results[i],int(sum(generated_ids[i] != self.model.generation_config.pad_token_id).detach().to('cpu')) - batch_inputs.input_ids[0].shape[-1]))
-        elif not self.do_sample and self.k_first == 1:
-            generated_ids = self.model.generate(
-                **inputs,
-                **self.generate_kwargs,
-            )
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids, generated_ids)
-            ]
-            out = self.processor.tokenizer.batch_decode(
-                generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-            )
-        elif not self.do_sample and self.k_first > 1:
-            out = cot_decode_qwen(model=self.model, processor=self.processor, inputs=inputs, image=images, video=videos, generation_config=self.generate_kwargs, k_first=self.k_first)
+        else:
+            text = self.processor.apply_chat_template([messages], tokenize=False, add_generation_prompt=True)
+            images, videos = process_vision_info([messages])
+            inputs = self.processor(text=text, images=images, videos=videos, padding=True, return_tensors='pt')
+            inputs = inputs.to('cuda')
+            if not self.do_sample and self.k_first == 1:
+                generated_ids = self.model.generate(
+                    **inputs,
+                    **self.generate_kwargs,
+                )
+                generated_length = generated_ids[0].shape[-1] - inputs.input_ids[0].shape[-1]
+                generated_ids = [
+                    output_ids[len(input_ids):] for input_ids, output_ids in zip(inputs.input_ids, generated_ids)
+                ]
+                out = (self.processor.tokenizer.batch_decode(generated_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False,)[0], generated_length)
+            elif not self.do_sample and self.k_first > 1:
+                out = cot_decode_qwen(model=self.model, processor=self.processor, inputs=inputs, image=images, video=videos, generation_config=self.generate_kwargs, k_first=self.k_first)
         response = out
         if self.post_process:
             resp = response.split('\\boxed{')[-1]
