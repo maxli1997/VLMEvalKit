@@ -3,7 +3,7 @@ import pandas as pd
 import os
 from vlmeval.dataset.utils import mathvista
 
-model_name = 'R1-VL-2B'
+model_name = 'R1-VL-7B'
 choice = 4
 dataset = 'MathVista_MINI'
 judge = 'gpt-4o-mini'
@@ -27,6 +27,11 @@ majority['length'] = majority['length'].astype(float)
 majority = majority.rename(columns={'prediction': 'ref'})
 CoT_correct = 0
 maj_correct = 0
+
+
+CoT_coverage = 0
+maj_coverage = 0
+
 greedy_correct = 0
 for rows in zip(*[df.iterrows() for df in df_list]):
     index = rows[0][0]
@@ -41,18 +46,48 @@ for rows in zip(*[df.iterrows() for df in df_list]):
     for j, key in enumerate(res_list):
         aggr[key] = aggr.get(key, 0) + confidence_list[j]
     best_answer = max(aggr, key=aggr.get)
+
+    covered = False
+    for j, key in enumerate(res_list):
+        summary.at[index, 'res'] = key
+        if mathvista.post_check(summary.iloc[index], prefetch=False):
+            covered = True
+            break
+
+    if covered:
+        CoT_coverage += 1
+
+    '''print(aggr)
+    print("---")
+    print(best_answer)'''
+
     summary.at[index, 'res'] = best_answer
     vote = {}
     for j, key in enumerate(maj_res_list):
         vote[key] = vote.get(key, 0) + 1
+
+    covered = False
+
+    for j, key in enumerate(maj_res_list):
+        majority.at[index, 'res'] = key
+        if mathvista.post_check(majority.iloc[index], prefetch=False):
+            covered = True
+            break
+
+    if covered:
+        maj_coverage += 1
+
+
     most_answer = max(vote, key=vote.get)
     majority.at[index, 'res'] = most_answer
+
     summary.at[index, 'confidence'] = aggr[best_answer]
     if mathvista.post_check(summary.iloc[index], prefetch=False):
         summary.at[index, 'log'] = 'Correct'
         CoT_correct += 1
     else:
         summary.at[index, 'log'] = 'Wrong'
+    
     if mathvista.post_check(majority.iloc[index], prefetch=False):
         majority.at[index, 'log'] = 'Correct'
         maj_correct += 1
@@ -73,8 +108,15 @@ for rows in zip(*[df.iterrows() for df in df_list]):
         if most_answer == key:
             maj_select.append(k+1)
     majority.at[index, 'ref'] = maj_select
+
+    #print(summary.iloc[index])
+
+    #quit()
+
 print('CoT Accuracy: ', CoT_correct/len(summary))
+print('CoT Coverage: ', CoT_coverage/len(summary))
 print('Majority Vote Accuracy: ', maj_correct/len(majority))
+print('Majority Coverage: ', maj_coverage/len(majority))
 print('Greedy Accuracy: ', greedy_correct/len(df_greedy))
 
 # %%
