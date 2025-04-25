@@ -1,6 +1,19 @@
 # %%
+import shutil
 import pandas as pd
 import os
+from tqdm import tqdm
+
+
+from datasets import load_dataset
+
+mathv_dataset = load_dataset("AI4Math/MathVista")
+
+if os.path.exists("difficult_images"):
+    shutil.rmtree("difficult_images")
+
+os.makedirs("difficult_images")
+
 from vlmeval.dataset.utils import mathvista
 
 model_name = 'R1-VL-7B'
@@ -32,8 +45,14 @@ maj_correct = 0
 CoT_coverage = 0
 maj_coverage = 0
 
+difficult_questions = []
+
 greedy_correct = 0
-for rows in zip(*[df.iterrows() for df in df_list]):
+
+for rows in tqdm(zip(*[df.iterrows() for df in df_list])):
+
+    is_difficult = True
+
     index = rows[0][0]
     res_list = [rows[x][1].res for x in range(choice)]
     maj_res_list = [rows[x+choice][1].res for x in range(choice)]
@@ -56,6 +75,7 @@ for rows in zip(*[df.iterrows() for df in df_list]):
 
     if covered:
         CoT_coverage += 1
+        is_difficult = False
 
     '''print(aggr)
     print("---")
@@ -76,7 +96,7 @@ for rows in zip(*[df.iterrows() for df in df_list]):
 
     if covered:
         maj_coverage += 1
-
+        is_difficult = False
 
     most_answer = max(vote, key=vote.get)
     majority.at[index, 'res'] = most_answer
@@ -111,6 +131,12 @@ for rows in zip(*[df.iterrows() for df in df_list]):
 
     #print(summary.iloc[index])
 
+    if is_difficult:
+        image = mathv_dataset["testmini"][index]['decoded_image']
+        image.save(f"difficult_images/{index}.png")
+        difficult_questions.append(summary.iloc[index])
+
+
     #quit()
 
 print('CoT Accuracy: ', CoT_correct/len(summary))
@@ -118,6 +144,10 @@ print('CoT Coverage: ', CoT_coverage/len(summary))
 print('Majority Vote Accuracy: ', maj_correct/len(majority))
 print('Majority Coverage: ', maj_coverage/len(majority))
 print('Greedy Accuracy: ', greedy_correct/len(df_greedy))
+print('Difficult Questions: ', len(difficult_questions)/len(df_greedy))
+
+difficult_questions_df = pd.DataFrame(difficult_questions)
+difficult_questions_df.to_excel('difficult_questions.xlsx', index=False)
 
 # %%
 with pd.ExcelWriter(f'{model_name}_{dataset}_{choice}_{judge}.xlsx', engine='openpyxl') as writer:

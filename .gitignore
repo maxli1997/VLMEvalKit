@@ -202,3 +202,5 @@ pci.ids
 *.xlsx
 *.slurm
 interactive.sh
+difficult_images
+*.zip
