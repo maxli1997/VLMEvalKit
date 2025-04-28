@@ -16,7 +16,7 @@ os.makedirs("difficult_images")
 
 from vlmeval.dataset.utils import mathvista
 
-model_name = 'R1-VL-7B'
+model_name = 'VLAA-Thinker-Qwen2.5VL-3B-CoT'
 choice = 4
 dataset = 'MathVista_MINI'
 judge = 'gpt-4o-mini'

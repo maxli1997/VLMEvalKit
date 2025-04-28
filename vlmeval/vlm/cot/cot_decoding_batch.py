@@ -259,7 +259,7 @@ def cot_decode_qwen(
         answer_text = processor.decode(answer_ids, skip_special_tokens=True)
         # Calculate confidence score (Δ)
         confidence = calculate_confidence([z[i,:].unsqueeze(0) for z in output.scores], answer_ids)
-        paths.append((answer_text, confidence, len(answer_ids) + n_depth))
+        paths.append((answer_text, confidence, int(sum(answer_ids != model.generation_config.pad_token_id).detach().to('cpu')) + n_depth))
     
     paths.sort(key=lambda x: x[1], reverse=True)
     return paths

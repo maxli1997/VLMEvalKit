@@ -81,10 +81,13 @@ def infer_data_api(model, work_dir, model_name, dataset, index_set=None, api_npr
 
 def infer_data(model, model_name, work_dir, dataset, out_file, verbose=False, api_nproc=4, use_vllm=False, choice=1, do_sample=False):
     dataset_name = dataset.dataset_name
-    prev_file = f'{work_dir}/{model_name}_{dataset_name}_PREV.pkl'
-    res = load(prev_file) if osp.exists(prev_file) else {}
-    if osp.exists(out_file):
-        res.update(load(out_file))
+    if choice == 1:
+        prev_file = f'{work_dir}/{model_name}_{dataset_name}_PREV.pkl'
+        res = load(prev_file) if osp.exists(prev_file) else {}
+        if osp.exists(out_file):
+            res.update(load(out_file))
+    else:
+        res = {}
 
     rank, world_size = get_rank_and_world_size()
     sheet_indices = list(range(rank, len(dataset), world_size))
@@ -168,16 +171,17 @@ def infer_data_job(
     dataset_name = dataset.dataset_name
     result_file = osp.join(work_dir, f'{model_name}_{dataset_name}.xlsx')
 
-    prev_file = f'{work_dir}/{model_name}_{dataset_name}_PREV.pkl'
-    if osp.exists(result_file):
-        if rank == 0:
-            data = load(result_file)
-            results = {k: v for k, v in zip(data['index'], data['prediction'])}
-            if not ignore_failed:
-                results = {k: v for k, v in results.items() if FAIL_MSG not in str(v)}
-            dump(results, prev_file)
-        if world_size > 1:
-            dist.barrier()
+    if choice == 1:
+        prev_file = f'{work_dir}/{model_name}_{dataset_name}_PREV.pkl'
+        if osp.exists(result_file):
+            if rank == 0:
+                data = load(result_file)
+                results = {k: v for k, v in zip(data['index'], data['prediction'])}
+                if not ignore_failed:
+                    results = {k: v for k, v in results.items() if FAIL_MSG not in str(v)}
+                dump(results, prev_file)
+            if world_size > 1:
+                dist.barrier()
 
     tmpl = osp.join(work_dir, '{}' + f'{world_size}_{dataset_name}.pkl')
     out_file = tmpl.format(rank)
@@ -208,10 +212,8 @@ def infer_data_job(
         else:
             for i in range(choice):
                 data['prediction'] = [str(data_all[x][i][0]) for x in data['index']]
-                try:
+                if not do_sample:
                     data['confidence'] = [str(data_all[x][i][1]) for x in data['index']]
-                except:
-                    pass
                 data['length'] = [str(data_all[x][i][-1]) for x in data['index']]
                 if 'image' in data:
                     data.pop('image')
