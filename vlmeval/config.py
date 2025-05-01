@@ -1138,13 +1138,15 @@ CoT_series = {
         max_pixels=16384 * 28 * 28, system_prompt='Please think step by step.',),
     'R1-VL-7B': partial(CoT, model_path='jingyiZ00/R1-VL-7B',  min_pixels=1280 * 28 * 28,
         max_pixels=16384 * 28 * 28, system_prompt='Please think step by step.',),
+    'VL-Rethinker-7B': partial(CoT, model_path='TIGER-Lab/VL-Rethinker-7B',  min_pixels=256 * 28 * 28,
+        max_pixels=1280 * 28 * 28, system_prompt='Please think step by step.',),
     'VLAA-Thinker-Qwen2.5VL-3B-CoT': partial(
         VLAAThinkerChatCoT, 
         model_path='UCSC-VLAA/VLAA-Thinker-Qwen2.5VL-3B', 
         min_pixels=1280*28*28, 
         max_pixels=16384*28*28, 
         use_custom_prompt=False,
-        post_process=True, # post processing for evaluation
+        post_process=False, # post processing for evaluation
         system_prompt=(''
                     "You are VL-Thinking🤔, a helpful assistant with excellent reasoning ability."
                     " A user asks you a question, and you should try to solve it."
@@ -1160,7 +1162,7 @@ CoT_series = {
         min_pixels=1280*28*28, 
         max_pixels=16384*28*28, 
         use_custom_prompt=False,
-        post_process=True, # post processing for evaluation
+        post_process=False, # post processing for evaluation
         system_prompt=(''
                     "You are VL-Thinking🤔, a helpful assistant with excellent reasoning ability."
                     " A user asks you a question, and you should try to solve it."

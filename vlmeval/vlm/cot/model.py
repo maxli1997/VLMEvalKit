@@ -105,8 +105,7 @@ class CoT(CoTPromptMixin, BaseModel):
         MODEL_CLS = None
         self.k_first = k_first
         self.do_sample = do_sample
-
-        if listinstr(['2.5', '2_5', 'qwen25'], model_path.lower()):
+        if listinstr(['2.5', '2_5', 'qwen25', 'rethinker'], model_path.lower()):
             from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
             MODEL_CLS = Qwen2_5_VLForConditionalGeneration
             self.processor = AutoProcessor.from_pretrained(model_path)
