@@ -1,48 +1,66 @@
 from __future__ import annotations
 
 import os
-import torch
-import re
+import sys
+import warnings
 import math
 import logging
-import warnings
+
+import torch
 
 from ..base import BaseModel
-from .prompt import CoTPromptMixin
+from .prompt import VLRETHINKERPromptMixin
 from .cot_decoding_batch import cot_decode_qwen
-from ..qwen2_vl.model import split_model, ensure_image_url, ensure_video_url
 from ...smp import get_rank_and_world_size, get_gpu_memory, auto_split_flag, listinstr
 
 
-def extract_answer_tag(s: str, verbose=False) -> str:
-    # Regular expression to match content between <answer> and </answer>
-    matches = re.findall(r'<answer>(.*?)</answer>', s, re.DOTALL)
-    if len(matches) == 0:
-        if verbose:
-            print("No <answer>...</answer> blocks found.")
-        return None
-    elif len(matches) > 1:
-        if verbose:
-            print("Multiple <answer>...</answer> blocks found.")
-        return None
-    else:
-        return matches[0].strip()
+def ensure_image_url(image: str) -> str:
+    prefixes = ['http://', 'https://', 'file://', 'data:image;']
+    if any(image.startswith(prefix) for prefix in prefixes):
+        return image
+    if os.path.exists(image):
+        return 'file://' + image
+    raise ValueError(f'Invalid image: {image}')
 
 
-def extract_response_for_eval(s: str, verbose=False):
-    ret = None
-    # <answer> {}</answer>
-    if ret is None:
-        ret = extract_answer_tag(s, verbose=verbose)
-    # </think>
-    elif '</think>' in s:
-        ret = s.split('</think>')[-1]
-    if ret is None:
-        ret = s
-    return ret
+def ensure_video_url(video: str) -> str:
+    prefixes = ['http://', 'https://', 'file://', 'data:video;']
+    if any(video.startswith(prefix) for prefix in prefixes):
+        return video
+    if os.path.exists(video):
+        return 'file://' + video
+    raise ValueError(f'Invalid video: {video}')
 
 
-class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
+def split_model():
+    device_map = {}
+
+    total_gpus = torch.cuda.device_count()
+    rank, world_size = get_rank_and_world_size()
+    num_gpus = total_gpus // world_size
+    # + 8 is virtual layers for the memory of visual
+    num_layers = 80 + 8
+    num_layers_per_gpu = math.ceil(num_layers / num_gpus)
+    num_layers_per_gpu = [num_layers_per_gpu] * num_gpus
+    num_layers_per_gpu[0] -= 6
+    num_layers_per_gpu[-1] -= 2
+    layer_cnt = 0
+
+    for i, num_layer in enumerate(num_layers_per_gpu):
+        for j in range(num_layer):
+            device_map[f'model.layers.{layer_cnt}'] = rank + i * world_size
+            layer_cnt += 1
+
+    last_gpu = rank + (num_gpus - 1) * world_size
+    device_map['visual'] = rank
+    device_map['model.embed_tokens'] = rank
+    device_map['model.norm'] = last_gpu
+    device_map['model.rotary_emb'] = last_gpu
+    device_map['lm_head'] = last_gpu
+    return device_map
+
+
+class VLRETHINKER(VLRETHINKERPromptMixin, BaseModel):
     INSTALL_REQ = False
     INTERLEAVE = True
     VIDEO_LLM = True
@@ -63,7 +81,6 @@ class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
         verbose: bool = False,
         k_first=1,
         do_sample: bool = False,
-        **kwargs,
     ):
         super().__init__(use_custom_prompt=use_custom_prompt)
         self.min_pixels = min_pixels
@@ -76,7 +93,6 @@ class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
             repetition_penalty=repetition_penalty,
             do_sample=do_sample,
         )
-        self.generate_kwargs.update(kwargs)
         self.system_prompt = system_prompt
         self.verbose = verbose
         self.post_process = post_process
@@ -86,14 +102,13 @@ class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
         rank, world_size = get_rank_and_world_size()
         assert model_path is not None
         self.model_path = model_path
+        MODEL_CLS = None
         self.k_first = k_first
         self.do_sample = do_sample
-        MODEL_CLS = None
-
-        if listinstr(['2.5', '2_5', 'qwen25'], model_path.lower()):
+        if listinstr(['2.5', '2_5', 'qwen25', 'rethinker'], model_path.lower()):
             from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
             MODEL_CLS = Qwen2_5_VLForConditionalGeneration
-            self.processor = AutoProcessor.from_pretrained(model_path, padding_side="left")
+            self.processor = AutoProcessor.from_pretrained(model_path)
         else:
             from transformers import Qwen2VLForConditionalGeneration, Qwen2VLProcessor
             MODEL_CLS = Qwen2VLForConditionalGeneration
@@ -106,18 +121,18 @@ class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
         # If only one process and GPU memory is less than 40GB
         if '72b' in self.model_path.lower():
             self.model = MODEL_CLS.from_pretrained(
-                model_path, torch_dtype='auto', device_map=split_model(), attn_implementation='flash_attention_2'
+                model_path, torch_dtype='bfloat16', device_map=split_model(), attn_implementation='flash_attention_2'
             )
             self.model.eval()
         elif auto_split_flag():
             assert world_size == 1, 'Only support world_size == 1 when AUTO_SPLIT is set for non-72B Qwen2-VL'
             # Will Use All GPUs to run one model
             self.model = MODEL_CLS.from_pretrained(
-                model_path, torch_dtype='auto', device_map='auto', attn_implementation='flash_attention_2'
+                model_path, torch_dtype='bfloat16', device_map='auto', attn_implementation='flash_attention_2'
             )
         else:
             self.model = MODEL_CLS.from_pretrained(
-                model_path, torch_dtype='auto', device_map='cpu', attn_implementation='flash_attention_2'
+                model_path, torch_dtype='bfloat16', device_map='cpu', attn_implementation='flash_attention_2'
             )
             self.model.cuda().eval()
 
@@ -142,7 +157,12 @@ class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
                     if self.max_pixels is not None:
                         item['max_pixels'] = self.max_pixels
             elif s['type'] == 'video':
-                item = {'type': 'video', 'video': ensure_video_url(s['value'])}
+                item = {
+                    'type': 'video',
+                    'video': ensure_video_url(s['value']),
+                    'min_pixels': self.min_pixels,
+                    'max_pixels': self.max_pixels
+                }
                 if self.fps is not None:
                     item['fps'] = self.fps
                 elif self.nframe is not None:
@@ -214,20 +234,23 @@ class VLAAThinkerChatCoT(CoTPromptMixin, BaseModel):
                 out = cot_decode_qwen(model=self.model, processor=self.processor, inputs=inputs, image=images, video=videos, generation_config=self.generate_kwargs, k_first=self.k_first)
         response = out
         if self.post_process:
-            if self.k_first > 1:
-                for index, res in enumerate(out):
-                    res = list(res)
-                    extracted_out = extract_response_for_eval(res[0], verbose=self.verbose)
-                    res[0] = extracted_out
-                    res = tuple(res)
-                    response[index] = res
-            else:
-                res = list(out)
-                extracted_out= extract_response_for_eval(res[0], verbose=self.verbose)
-                res[0] = extracted_out
-                res = tuple(res)
-                response = res
+            resp = response.split('\\boxed{')[-1]
+            lt = len(resp)
+            counter, end = 1, None
+            for i in range(lt):
+                if resp[i] == '{':
+                    counter += 1
+                elif resp[i] == '}':
+                    counter -= 1
+                if counter == 0:
+                    end = i
+                    break
+                elif i == lt - 1:
+                    end = lt
+                    break
+            if end is not None:
+                response = resp[:end]
+
         if self.verbose:
             print(f'\033[32m{response}\033[0m')
-            
         return response

@@ -1,5 +1,5 @@
 from vlmeval.vlm import *
-from vlmeval.vlm.cot import VLAAThinkerChatCoT
+from vlmeval.vlm.cot import VLAAThinkerChatCoT, VLRETHINKER
 from vlmeval.api import *
 from functools import partial
 
@@ -1135,11 +1135,11 @@ qwen2vl_series = {
 
 CoT_series = {
     'R1-VL-2B': partial(CoT, model_path='jingyiZ00/R1-VL-2B', min_pixels=1280 * 28 * 28,
-        max_pixels=16384 * 28 * 28, system_prompt='Please think step by step.',),
+        max_pixels=16384 * 28 * 28),
     'R1-VL-7B': partial(CoT, model_path='jingyiZ00/R1-VL-7B',  min_pixels=1280 * 28 * 28,
-        max_pixels=16384 * 28 * 28, system_prompt='Please think step by step.',),
-    'VL-Rethinker-7B': partial(CoT, model_path='TIGER-Lab/VL-Rethinker-7B',  min_pixels=256 * 28 * 28,
-        max_pixels=1280 * 28 * 28, system_prompt='Please think step by step.',),
+        max_pixels=16384 * 28 * 28),
+    'VL-Rethinker-7B': partial(VLRETHINKER, model_path='TIGER-Lab/VL-Rethinker-7B',  min_pixels=256 * 28 * 28,
+        max_pixels=1280 * 28 * 28),
     'VLAA-Thinker-Qwen2.5VL-3B-CoT': partial(
         VLAAThinkerChatCoT, 
         model_path='UCSC-VLAA/VLAA-Thinker-Qwen2.5VL-3B', 

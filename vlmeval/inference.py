@@ -206,8 +206,8 @@ def infer_data_job(
                 data['length'] = [str(data_all[x][-1]) for x in data['index']]
             except:
                 data['prediction'] = [str(data_all[x]) for x in data['index']]
-            if 'image' in data:
-                data.pop('image')
+            #if 'image' in data:
+                #data.pop('image')
             dump(data, result_file)
         else:
             for i in range(choice):
@@ -215,8 +215,8 @@ def infer_data_job(
                 if not do_sample:
                     data['confidence'] = [str(data_all[x][i][1]) for x in data['index']]
                 data['length'] = [str(data_all[x][i][-1]) for x in data['index']]
-                if 'image' in data:
-                    data.pop('image')
+                #if 'image' in data:
+                    #data.pop('image')
 
                 dump(data, result_file.replace('.xlsx','') + f'_{do_sample}_{i}.xlsx')
         for i in range(world_size):
