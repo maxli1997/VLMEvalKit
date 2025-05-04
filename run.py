@@ -163,6 +163,9 @@ def main():
     logger = get_logger('RUN')
     rank, world_size = get_rank_and_world_size()
     args = parse_args()
+
+    args.work_dir = osp.join(args.work_dir, f"{args.choice}_{args.do_sample}_{args.model}")
+
     use_config, cfg = False, None
     if args.config is not None:
         assert args.data is None and args.model is None, '--data and --model should not be set when using --config'

@@ -16,21 +16,23 @@ os.makedirs("difficult_images")
 
 from vlmeval.dataset.utils import mathvista
 
-model_name = 'VLAA-Thinker-Qwen2.5VL-3B-CoT'
+model_name = 'VLAA-Thinker-Qwen2.5VL-7B-CoT'
 choice = 4
 dataset = 'MathVista_MINI'
 judge = 'gpt-4o-mini'
 
+output_path = "outputs_aggregated"
+
 # %%
-file_path = os.path.join('outputs', model_name, f'{model_name}_{dataset}_{judge}.xlsx')
+file_path = os.path.join(output_path, model_name, f'{model_name}_{dataset}_{judge}.xlsx')
 df_greedy = pd.read_excel(file_path)
 # CoT results aggregation
 df_list = [pd.DataFrame() for _ in range(2*choice)]
 for i in range(choice):
-    file_path = os.path.join('outputs', model_name, f'{model_name}_{dataset}_False_{i}_{judge}.xlsx')
+    file_path = os.path.join(output_path, model_name, f'{model_name}_{dataset}_False_{i}_{judge}.xlsx')
     df_list[i] = pd.read_excel(file_path)
 for i in range(choice):
-    file_path = os.path.join('outputs', model_name, f'{model_name}_{dataset}_True_{i}_{judge}.xlsx')
+    file_path = os.path.join(output_path, model_name, f'{model_name}_{dataset}_True_{i}_{judge}.xlsx')
     df_list[i+choice] = pd.read_excel(file_path)
 summary = df_list[0].copy(deep=True)
 summary['length'] = summary['length'].astype(float)
@@ -132,8 +134,8 @@ for rows in tqdm(zip(*[df.iterrows() for df in df_list])):
     #print(summary.iloc[index])
 
     if is_difficult:
-        image = mathv_dataset["testmini"][index]['decoded_image']
-        image.save(f"difficult_images/{index}.png")
+        #image = mathv_dataset["testmini"][index]['decoded_image']
+        #image.save(f"difficult_images/{index}.png")
         difficult_questions.append(summary.iloc[index])
 
 

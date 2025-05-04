@@ -204,3 +204,5 @@ pci.ids
 interactive.sh
 difficult_images
 *.zip
+
+old_outputs

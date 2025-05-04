@@ -7,7 +7,7 @@ matplotlib
 numpy
 omegaconf
 openai
-opencv-python>=4.4.0.46
+opencv-python
 openpyxl
 pandas
 pillow
